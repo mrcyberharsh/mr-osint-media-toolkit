@@ -74,7 +74,7 @@ All rights reserved — see [`LICENSE`](LICENSE). Free for personal/educational 
 
 ## Contact
 
-- Email: cyber.h4rsh@zohomail.in
+- Email: manager.prachi@zohomail.in
 - Website: https://mrcyberharsh.github.io/mrcyber/
 
 ---
