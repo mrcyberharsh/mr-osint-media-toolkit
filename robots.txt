@@ -1,0 +1,42 @@
+# robots.txt for MR CYBER — All Subdomains
+# Author: Harsh Saini (MR CYBER)
+# Last Updated: 2026-09-11
+
+# Allow all search engines and good bots
+User-agent: *
+Allow: /
+
+# Disallow sensitive paths (admin, login, private, API)
+Disallow: /admin/
+Disallow: /login/
+Disallow: /private/
+Disallow: /api/
+Disallow: /dashboard/
+Disallow: /config/
+Disallow: /backup/
+Disallow: /tmp/
+
+# Disallow common WordPress/backend paths (if any)
+Disallow: /wp-admin/
+Disallow: /wp-includes/
+Disallow: /wp-content/plugins/
+Disallow: /xmlrpc.php
+
+# Block bad bots that scrape content or spam
+User-agent: AhrefsBot
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /
+
+User-agent: MJ12bot
+Disallow: /
+
+User-agent: DotBot
+Disallow: /
+
+User-agent: BLEXBot
+Disallow: /
+
+# Sitemap (update for each subdomain)
+Sitemap: https://mrcyber.com/sitemap.xml
