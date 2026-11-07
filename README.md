@@ -70,7 +70,19 @@ python mr_osint_media.py photo.jpg --strip
 
 # Generate manual reverse-image-search links
 python mr_osint_media.py photo.jpg --reverse-search
+
+# Batch JSON/CSV manifests (GPS redacted by default)
+python mr_osint_media.py ./photos --recursive --report-json manifest.json --report-csv manifest.csv
+
+# Include GPS only when you intentionally need it in the report
+python mr_osint_media.py ./photos --recursive --report-json manifest.json --include-gps-in-report
 ```
+
+## Batch manifests and privacy
+
+Use `--report-json` and `--report-csv` to export a manifest for multiple files. Reports include hashes and selected metadata; exact GPS coordinates are excluded by default. Add `--include-gps-in-report` only when you intentionally need precise location data in the export. Keep reports private because they may contain device identifiers, timestamps, local file paths, and other sensitive metadata.
+
+The `--strip` option writes a new image copy using pixel data without carrying over EXIF or ancillary metadata. Keep the original file unchanged if you need to preserve evidence.
 
 ## Privacy and responsible use
 
