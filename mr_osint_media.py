@@ -51,6 +51,7 @@ Usage:
 """
 
 import argparse
+import csv
 import hashlib
 import json
 import os
@@ -221,7 +222,13 @@ def strip_image_metadata(path, output_path):
         return False, "Pillow isn't installed. Run: pip install Pillow"
     try:
         img = Image.open(path)
-        img.save(output_path)
+        # Rebuild pixel data into a fresh image so EXIF and ancillary metadata
+        # are not copied into the output file.
+        clean = Image.new(img.mode, img.size)
+        clean.putdata(list(img.getdata()))
+        if img.mode == "P" and img.getpalette():
+            clean.putpalette(img.getpalette())
+        clean.save(output_path, format=img.format)
         return True, None
     except Exception as e:
         return False, str(e)
@@ -349,31 +356,40 @@ def process_file(path, args, collected_gps_points):
     ext = os.path.splitext(path)[1].lower()
     print(f"\n  {path}")
     print("  " + "-" * 58)
+    record = {"file": path, "type": "image" if ext in IMAGE_EXTS else "video" if ext in VIDEO_EXTS else "unknown"}
 
     hashes, hash_err = compute_hashes(path)
+    record["hashes"] = hashes or {}
     if hashes:
         print(f"    SHA256: {hashes['SHA256']}")
     else:
+        record["hash_error"] = hash_err
         print(f"    Hash error: {hash_err}")
 
     if ext in IMAGE_EXTS:
         data, err = extract_image_metadata(path)
         if err:
+            record["error"] = err
             print(f"    Error: {err}")
-            return
+            return record
         print(f"    Format: {data['format']}  |  Size: {data['size']}  |  Mode: {data['mode']}")
+        record["metadata"] = {
+            "format": data["format"], "size": data["size"], "mode": data["mode"],
+            "exif": data["exif"], "editing_flags": data["editing_flags"],
+        }
         if data["exif"]:
-            for k in ("Make", "Model", "DateTimeOriginal", "Software"):
-                if k in data["exif"]:
-                    print(f"    {k}: {data['exif'][k]}")
-        if data["editing_flags"]:
-            for flag in data["editing_flags"]:
-                print(f"    ⚠ {flag}")
+            for key in ("Make", "Model", "DateTimeOriginal", "Software"):
+                if key in data["exif"]:
+                    print(f"    {key}: {data['exif'][key]}")
+        for flag in data["editing_flags"]:
+            print(f"    ⚠ {flag}")
         if data["gps"]:
             lat, lon = data["gps"]["lat"], data["gps"]["lon"]
             print(f"    ⚠ GPS found: {lat}, {lon}")
             print(f"      Maps: {data['gps']['maps_url']}")
             collected_gps_points.append((os.path.basename(path), lat, lon))
+            if args.include_gps_in_report:
+                record["gps"] = data["gps"]
             if args.geocode:
                 address, geo_err = reverse_geocode(lat, lon)
                 if address:
@@ -382,17 +398,19 @@ def process_file(path, args, collected_gps_points):
                     print(f"      Reverse geocoding failed: {geo_err}")
         else:
             print("    GPS: none found")
-
         if args.strip:
             out_path = os.path.splitext(path)[0] + "_stripped" + ext
             ok, strip_err = strip_image_metadata(path, out_path)
+            record["stripped_copy"] = out_path if ok else None
             print(f"    ✓ Stripped copy saved: {out_path}" if ok else f"    Strip failed: {strip_err}")
 
     elif ext in VIDEO_EXTS:
         data, err = extract_video_metadata(path)
         if err:
+            record["error"] = err
             print(f"    {err}")
-            return
+            return record
+        record["metadata"] = data
         if data["duration_sec"]:
             print(f"    Duration: {float(data['duration_sec']):.1f}s  |  Resolution: {data['resolution']}  |  Codec: {data['codec']}")
         if data["creation_time"]:
@@ -404,6 +422,8 @@ def process_file(path, args, collected_gps_points):
             print(f"    ⚠ GPS found: {lat}, {lon}")
             print(f"      Maps: {data['gps']['maps_url']}")
             collected_gps_points.append((os.path.basename(path), lat, lon))
+            if args.include_gps_in_report:
+                record["gps"] = data["gps"]
             if args.geocode:
                 address, geo_err = reverse_geocode(lat, lon)
                 if address:
@@ -412,16 +432,44 @@ def process_file(path, args, collected_gps_points):
                     print(f"      Reverse geocoding failed: {geo_err}")
         else:
             print("    GPS: none found")
-
     else:
-        print(f"    Unsupported file type ({ext})")
-        return
+        record["error"] = f"Unsupported file type ({ext})"
+        print(f"    {record['error']}")
+        return record
 
     if args.reverse_search:
-        links, abs_path = reverse_search_links(path)
+        links, _ = reverse_search_links(path)
+        record["reverse_search_links"] = links
         print(f"    Reverse image search (open manually, upload {os.path.basename(path)}):")
         for name, url in links.items():
             print(f"      {name}: {url}")
+    return record
+
+
+def write_manifest(records, json_path=None, csv_path=None):
+    """Write opt-in metadata manifests; GPS is omitted unless explicitly enabled."""
+    if json_path:
+        with open(json_path, "w", encoding="utf-8") as handle:
+            json.dump(records, handle, indent=2, ensure_ascii=False, default=str)
+    if csv_path:
+        fields = ["file", "type", "sha256", "size", "format", "duration_sec", "codec", "resolution", "gps_included", "error"]
+        with open(csv_path, "w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields)
+            writer.writeheader()
+            for record in records:
+                metadata = record.get("metadata", {})
+                writer.writerow({
+                    "file": record.get("file", ""),
+                    "type": record.get("type", ""),
+                    "sha256": record.get("hashes", {}).get("SHA256", ""),
+                    "size": metadata.get("size", metadata.get("size_bytes", "")),
+                    "format": metadata.get("format", metadata.get("format_name", "")),
+                    "duration_sec": metadata.get("duration_sec", ""),
+                    "codec": metadata.get("codec", ""),
+                    "resolution": metadata.get("resolution", ""),
+                    "gps_included": "yes" if record.get("gps") else "no",
+                    "error": record.get("error", ""),
+                })
 
 
 # ---------------------------------------------------------------------
@@ -440,6 +488,9 @@ def main():
     parser.add_argument("--geocode", action="store_true", help="Reverse-geocode any GPS coordinates found into a readable address (needs internet)")
     parser.add_argument("--reverse-search", action="store_true", help="Print reverse-image-search links for each image (does not search automatically)")
     parser.add_argument("--map", action="store_true", help="Generate an HTML map (map_report.html) of all GPS points found")
+    parser.add_argument("--report-json", help="Optional path for a JSON metadata manifest (GPS redacted by default)")
+    parser.add_argument("--report-csv", help="Optional path for a CSV metadata manifest")
+    parser.add_argument("--include-gps-in-report", action="store_true", help="Include exact GPS coordinates in JSON/CSV exports; sensitive location data")
     args = parser.parse_args()
 
     if not HAVE_PIL:
@@ -470,8 +521,16 @@ def main():
 
     print(f"\nFound {len(targets)} supported file(s).")
     gps_points = []
+    records = []
     for t in targets:
-        process_file(t, args, gps_points)
+        records.append(process_file(t, args, gps_points))
+
+    if args.report_json or args.report_csv:
+        write_manifest(records, args.report_json, args.report_csv)
+        if args.report_json:
+            print(f"\nJSON manifest saved: {args.report_json}")
+        if args.report_csv:
+            print(f"CSV manifest saved: {args.report_csv}")
 
     if args.map:
         if gps_points:
